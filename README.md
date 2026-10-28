@@ -11,4 +11,4 @@ git clone https://github.com/pilloPl/granice-spojnosci-skille.git
 cp -R granice-spojnosci-skille/problem-classifier granice-spojnosci-skille/context-distiller granice-spojnosci-skille/aggregate-designer ~/.claude/skills/
 ```
 
-Potem w Claude Code: `/problem-classifier <wymagania>` `/context-distiller <pojęcia do sprawdzenia>` albo `/aggregate-designer <lista komend>`.
+Potem w Claude Code: `/problem-classifier <wymagania>`, `/context-distiller <pojęcia do sprawdzenia>` albo `/aggregate-designer <lista komend>`.
