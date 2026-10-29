@@ -184,6 +184,8 @@ AskUserQuestion:
 >      a database exclusion constraint may be simpler and more performant than an aggregate.
 >      The aggregate adds value only when the decision logic is richer than "no overlap."
 >      ```
+>      Before settling on this option, run the testability probe from Phase 8 ("Where the decision lives") —
+>      many injectable strategies around the booking rules push the design back to an application aggregate.
 >
 > Document the chosen approach in the final model under Locking Strategy or Open Design Decisions.
 
@@ -366,6 +368,35 @@ AskUserQuestion:
     "Unsure — tell me more about the tradeoffs"
 ```
 
+### Where the decision lives: database vs application
+
+Whenever your recommendation puts the invariant check **inside the database** — a single conditional `UPDATE … WHERE <rules>`, an atomic increment/decrement guarded by `WHERE`, a `CHECK` / exclusion / unique constraint, a stored procedure — do **not** finalize it silently. A DB-native aggregate is fast and lock-cheap, but its rules live in SQL/schema: they can only be tested against a real database, and they are hard to vary per product, tenant, campaign or configuration. Before moving on, ask:
+
+```
+AskUserQuestion:
+  "I'm proposing to enforce '[invariant]' directly in the database ([mechanism, e.g. conditional UPDATE]).
+   That keeps the lock as short as one statement, but the rules then live in SQL — hard to unit-test
+   and hard to swap. Will this aggregate's behavior be shaped by many injectable strategies
+   (e.g. different limit/pricing/eligibility policies per product, tenant or campaign; rules that change often)?"
+  Options:
+    "No — rules are few and stable; keep the decision in the database"
+    "Yes — many injectable strategies; I need the rules testable in code (application aggregate)"
+    "Some — a couple of variants now, likely more later"
+    "Unsure — tell me more about the tradeoffs"
+```
+
+**Decision logic:**
+
+- **No** → keep the DB-native aggregate. Record in the model that the rules live in SQL/schema and that they are covered by integration tests against the database, not by unit tests.
+- **Yes** → **application aggregate**: load the aggregate state (with `SELECT … FOR UPDATE` for pessimistic or a `version` field for optimistic), decide in code — the aggregate receives the strategies (policy objects) as injected collaborators — then save. The rules and every strategy are unit-testable without a database. Cost: the lock is held across a load–decide–save round-trip instead of one statement, so per-instance throughput drops. Re-check the Phase 5 volume answer: if volume per instance is high, say so explicitly, keep the transaction minimal (no external calls inside it), and add the throughput trade-off to Open Design Decisions.
+- **Some** → consider a **hybrid**, but only when it is valid:
+  - strategies that compute their output **only from data outside the contended state** (e.g. "effective limit for this product today", "cost of this operation") may run in code *before* the statement and pass their results as parameters to the conditional `UPDATE`; the atomic check stays in the database;
+  - strategies that need to **read the contended state itself** (balance, usage, current bookings) must run under the lock → that pushes the design to the application aggregate.
+
+  Present which strategies fall on which side, recommend one variant, and record the choice (and the trigger for revisiting it) in Open Design Decisions.
+
+Ask this probe at most once per aggregate, and also when a DB-native solution was proposed earlier (e.g. the exclusion-constraint option in the Phase 3 time-range trap).
+
 ---
 
 ## Phase 9: Final Model
@@ -449,6 +480,7 @@ Wait for confirmation before producing Part 2.
 ### Locking Strategy
 
 **Type**: Optimistic / Pessimistic / Compensating
+**Decision location**: Database (conditional UPDATE / constraint) / Application aggregate (load–decide–save) / Hybrid — [why, incl. the answer about injectable strategies and testability]
 **Rationale**: [one sentence]
 
 ### Consistency Model
